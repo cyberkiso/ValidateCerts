@@ -22,6 +22,8 @@ def main(argv):
                 Sem = asyncio.Semaphore(int(arg))
         inputfile: str = sys.argv[1]
         file = open(inputfile, "r")
+        rawdata = file.readlines()
+        file.close()
     except getopt.GetoptError:
         print("Usage: ValidateCerts.py <inputfile> [-n <requests_limit>]")
         sys.exit(2)
@@ -31,7 +33,7 @@ def main(argv):
         print("Error: input file name is missing."
               "Usage: ValidateCerts.py <inputfile>")
     domains = set()
-    for domain in set(map(str.strip, file.readlines())):
+    for domain in set(map(str.strip, rawdata)):
         if validators.domain(domain):
             domains.add(domain)
     print("Domains:", domains)
@@ -53,9 +55,14 @@ async def validate(domain):
             return domain
         except ClientConnectorCertificateError as e:
             await session.close()
+            Sem.release()
             if type(e.certificate_error is SSLCertVerificationError):
-                Sem.release()
                 return None
+            print("Validate error: domain=%s  exception=%s", domain, e)
+            return Exception("Validate error: domain=%s  exception=%s", domain, e)
+        except Exception as e:
+            print("Validate error: domain=%s  exception=%s", domain, e)
+            return Exception("Validate error: domain=%s  exception=%s", domain, e)
 
 
 async def validate_certs(domains, ):
@@ -63,18 +70,23 @@ async def validate_certs(domains, ):
         tasks = [asyncio.ensure_future(
             validate(domain)) for domain in domains]
         done = await asyncio.gather(*tasks)
-        validdomains = set()
+        unvaliddomains = set()
         for result in done:
-            if result is not None:
-                print("Valid: ", result)
-                validdomains.add(result+"\n")
+            tmp = type(result)
+            if result is None:
+                print("Unvalid: ", result)
+                unvaliddomains.add(result+"\n")
+                domains.remove(result)
+            elif type(result) is Exception:
                 domains.remove(result)
         for domain in domains:
-            print("Invalid: ", domain)
+            print("Valid: ", domain)
         validfile = open("Valid", "w")
-        validfile.writelines(validdomains)
+        validfile.writelines(domains)
+        validfile.close()
         unvalidfile = open("Unvalid", "w")
-        unvalidfile.writelines(domains)
+        unvalidfile.writelines(unvaliddomains)
+        unvalidfile.close()
     except Exception as e:
         print(e)
 
