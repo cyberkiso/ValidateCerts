@@ -61,6 +61,8 @@ async def validate(domain):
             print("Validate error: domain=%s  exception=%s", domain, e)
             return Exception("Validate error: domain=%s  exception=%s", domain, e)
         except Exception as e:
+            await session.close()
+            Sem.release()
             print("Validate error: domain=%s  exception=%s", domain, e)
             return Exception("Validate error: domain=%s  exception=%s", domain, e)
 
