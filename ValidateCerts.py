@@ -51,7 +51,6 @@ async def validate(domain):
             url = "https://" + domain + "/"
             async with aiohttp.ClientSession() as session:
                 await session.get(url)
-                await session.close()
             Sem.release()
             return domain
         except ClientConnectorCertificateError as e:
