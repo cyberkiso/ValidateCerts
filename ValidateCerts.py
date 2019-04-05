@@ -7,7 +7,6 @@ import asyncio
 import validators
 import aiohttp
 import os
-from aiohttp import ClientConnectorCertificateError
 import logging
 
 
@@ -31,17 +30,25 @@ def main(argv):
                     file_name = arg
                 else:
                     raise getopt.GetoptError
-        input_file = file_name
-        with open(input_file, "r") as file:
+        with open(file_name, "r") as file:
             raw_data = file.readlines()
-        domains = set()
-        for domain in set(map(str.strip, raw_data)):
+        domains = set(map(str.strip, raw_data))
+        domains_unchecked = set()
+        for domain in domains:
             if validators.domain(domain):
-                domains.add(domain)
-        log.debug(f"Domains: {domains}")
+                domains_unchecked.add(domain)
+        log.debug(f"Domains: {domains_unchecked}")
         loop = asyncio.get_event_loop()
-        loop.run_until_complete(validate_certs(domains, sem))
+        valid_domains = loop.run_until_complete(validate_certs(domains_unchecked, sem))
         loop.close()
+        valid_domains = [x + "\n" for x in valid_domains]
+        with open("Valid", "w") as valid_file:
+            valid_file.writelines(valid_domains)
+        unvalid_domains = set(raw_data)
+        for domain in valid_domains:
+            unvalid_domains.remove(domain)
+        with open("Unvalid", "w") as unvalid_file:
+            unvalid_file.writelines(unvalid_domains)
     except getopt.GetoptError:
         log.error("Usage: ValidateCerts.py -f <inputfile> [-n <requests_limit>]")
     except IndexError:
@@ -52,7 +59,6 @@ def main(argv):
 
 
 async def validate(domain, sem):
-    from _ssl import SSLCertVerificationError
     async with sem:
         try:
             log.debug(f"Validate domain={domain}")
@@ -61,20 +67,11 @@ async def validate(domain, sem):
                 await session.get(url)
             sem.release()
             return domain
-        except ClientConnectorCertificateError as e:
-            sem.release()
-            if type(e.certificate_error is SSLCertVerificationError):
-                return None
-            log.debug(f"Validate error: domain={domain} exception={e}")
-            return \
-                Exception(f"Validate error: domain={domain} exception={e}"), \
-                domain
         except Exception as e:
-            sem.release()
             log.debug(f"Validate error: domain={domain} exception={e}")
-            return \
-                Exception(f"Validate error: domain={domain} exception={e}"), \
-                domain
+            return None
+        finally:
+            sem.release()
 
 
 async def validate_certs(domains, sem):
@@ -83,16 +80,9 @@ async def validate_certs(domains, sem):
         done = await asyncio.gather(*tasks)
         valid_domains = set()
         for result in done:
-            if result is not None and type(result) is not tuple:
-                valid_domains.add(result + "\n")
-                domains.remove(result)
-            elif type(result) is tuple:
-                log.warning(f"Cannot get cert for domain={result[1]}")
-                domains.remove(result[1])
-        with open("Valid", "w") as valid_file:
-            valid_file.writelines(valid_domains)
-        with open("Unvalid", "w") as unvalid_file:
-            unvalid_file.writelines(domains)
+            if result is not None:
+                valid_domains.add(result)
+        return valid_domains
     except Exception as e:
         log.error(f"Exception: {e}")
 
